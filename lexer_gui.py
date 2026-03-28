@@ -1,5 +1,3 @@
-
-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import subprocess
@@ -755,29 +753,6 @@ class LexerApp(tk.Tk):
         def do_compile():
             try:
                 # We compile main.cpp. The headers (lexer.h, parser.h) will be included automatically by the compiler.
-                result = subprocess.run(
-                    ["g++", "-O2", "-std=c++17", src, "-o", out],
-                    capture_output=True, text=True, timeout=60)
-                if result.returncode == 0:
-                    self.after(0, lambda: self._set_status(
-                        "Backend compiled successfully!", busy=False))
-                    if then_analyze:
-                        self.after(200, lambda: self._analyze())
-                else:
-                    err = result.stderr
-                    self.after(0, lambda: self._on_error(
-                        f"Compilation failed:\n{err}"))
-            except FileNotFoundError:
-                self.after(0, lambda: self._on_error(
-                    "g++ not found. Please install GCC/MinGW and add it to PATH."))
-            except Exception as e:
-                self.after(0, lambda: self._on_error(str(e)))
-
-        threading.Thread(target=do_compile, daemon=True).start()
-        self._set_status("Compiling C++ backend…", busy=True)
-
-        def do_compile():
-            try:
                 result = subprocess.run(
                     ["g++", "-O2", "-std=c++17", src, "-o", out],
                     capture_output=True, text=True, timeout=60)
