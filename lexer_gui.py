@@ -1,3 +1,5 @@
+
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import subprocess
@@ -217,6 +219,7 @@ class LexerApp(tk.Tk):
 
         self._build_token_tab()
         self._build_symbol_tab()
+        self._build_ast_tab()
         self._build_source_tab()
         self._build_stats_tab()
 
@@ -234,6 +237,20 @@ class LexerApp(tk.Tk):
                                         font=FONT_SMALL, bg=BG_HEADER, fg=ACCENT,
                                         anchor="e")
         self._tok_count_lbl.pack(side="right", padx=16, pady=4)
+
+    def _build_ast_tab(self):
+        frame = tk.Frame(self._nb, bg=BG_PANEL)
+        self._nb.add(frame, text="  Parse Tree (AST)  ")
+
+        # Create Treeview with a single generic column
+        self._ast_tree = ttk.Treeview(frame, style="Tokens.Treeview")
+        self._ast_tree.heading("#0", text="Abstract Syntax Tree", anchor="w")
+        
+        vsb = ttk.Scrollbar(frame, orient="vertical", command=self._ast_tree.yview, style="Dark.Vertical.TScrollbar")
+        self._ast_tree.configure(yscrollcommand=vsb.set)
+        
+        vsb.pack(side="right", fill="y")
+        self._ast_tree.pack(fill="both", expand=True, padx=12, pady=10)
 
     # ── Token Tab ──────────────────────────────────────────────────────
     def _build_token_tab(self):
@@ -539,9 +556,10 @@ class LexerApp(tk.Tk):
     def _on_data(self, data, src_path):
         self._tokens_data  = data.get("tokens", [])
         self._symbols_data = data.get("symbol_table", [])
-
+        ast_data           = data.get("ast", [])
         self._populate_token_table(self._tokens_data)
         self._populate_symbol_table(self._symbols_data)
+        self._populate_ast_tree(ast_data)
         self._load_source(src_path)
         self._render_stats()
 
@@ -556,6 +574,37 @@ class LexerApp(tk.Tk):
     def _on_error(self, msg):
         self._set_status(f"Error: {msg}", busy=False, error=True)
         messagebox.showerror("Analysis Error", msg)
+
+    def _populate_ast_tree(self, ast_data):
+        self._ast_tree.delete(*self._ast_tree.get_children())
+        
+        # Recursive function to map JSON nodes to Tkinter Tree items
+        def insert_node(parent_id, node_data):
+            if isinstance(node_data, dict):
+                node_type = node_data.get("type", "Node")
+                
+                # Format a display string (e.g., "VarDecl: a (int)")
+                display_text = f"[{node_type}]"
+                if "identifier" in node_data:
+                    display_text += f" {node_data['identifier']}"
+                if "value" in node_data:
+                    display_text += f" = {node_data['value']}"
+                
+                item_id = self._ast_tree.insert(parent_id, "end", text=display_text, open=True)
+                
+                # Recursively add children
+                for key, val in node_data.items():
+                    if key not in ["type", "identifier", "value"]: # skip flat strings we just printed
+                        if isinstance(val, (dict, list)):
+                            child_folder = self._ast_tree.insert(item_id, "end", text=f"{key}:", open=True)
+                            insert_node(child_folder, val)
+                            
+            elif isinstance(node_data, list):
+                for item in node_data:
+                    insert_node(parent_id, item)
+
+        # Insert the root
+        insert_node("", ast_data)
 
     # ── Populate tables ────────────────────────────────────────────────
     def _populate_token_table(self, tokens):
@@ -693,14 +742,38 @@ class LexerApp(tk.Tk):
     # ── Compile backend ────────────────────────────────────────────────
     def _compile_backend(self, then_analyze=None):
         here = os.path.dirname(os.path.abspath(__file__))
-        src  = os.path.join(here, "lexer_backend.cpp")
+        src  = os.path.join(here, "main.cpp") # <--- Changed to main.cpp
         out  = os.path.join(here, "lexer_backend")
 
         if not os.path.isfile(src):
             messagebox.showerror("Source Not Found",
-                f"lexer_backend.cpp not found in:\n{here}")
+                f"main.cpp not found in:\n{here}\n\nMake sure main.cpp, lexer.h, and parser.h are in the same folder as this script.")
             return
 
+        self._set_status("Compiling C++ backend…", busy=True)
+
+        def do_compile():
+            try:
+                # We compile main.cpp. The headers (lexer.h, parser.h) will be included automatically by the compiler.
+                result = subprocess.run(
+                    ["g++", "-O2", "-std=c++17", src, "-o", out],
+                    capture_output=True, text=True, timeout=60)
+                if result.returncode == 0:
+                    self.after(0, lambda: self._set_status(
+                        "Backend compiled successfully!", busy=False))
+                    if then_analyze:
+                        self.after(200, lambda: self._analyze())
+                else:
+                    err = result.stderr
+                    self.after(0, lambda: self._on_error(
+                        f"Compilation failed:\n{err}"))
+            except FileNotFoundError:
+                self.after(0, lambda: self._on_error(
+                    "g++ not found. Please install GCC/MinGW and add it to PATH."))
+            except Exception as e:
+                self.after(0, lambda: self._on_error(str(e)))
+
+        threading.Thread(target=do_compile, daemon=True).start()
         self._set_status("Compiling C++ backend…", busy=True)
 
         def do_compile():
